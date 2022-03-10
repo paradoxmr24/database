@@ -1,2 +1,4 @@
-config.php
-.vscode
+*
+!database.php
+!config.example.php
+!.gitignore
