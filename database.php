@@ -6,6 +6,10 @@ class DB {
     private $query, $result, $con;
 
     public function __construct() {
+        /** @var string $location */
+        /** @var string $username */
+        /** @var string $password */
+        /** @var string $database */
         require __DIR__ . '/config.php';
         $this->con = mysqli_connect($location, $username, $password ,$database);
         if(!$this->con) {
@@ -27,75 +31,48 @@ class DB {
     }
 
     public function insert($table, $fields) {
-        $query = "INSERT INTO `$table` ";
-        $keys = "(";
-        $values = "(";
-        
-        foreach ($fields as $key => $value) {
-            $keys .= $key . ',';
-            $values .= "'" . mysqli_real_escape_string($this->con, $value) . "'" . ',';
-        }
+        $keys = '(`' . implode('`,`', array_keys($fields)) . '`)';
+        $values = "('" . implode("','", $this->escapeArray(array_values($fields))) . "')";
 
-        $keys = $this->removeLastChar($keys);
-        $values = $this->removeLastChar($values);
-
-        $keys .= ')';
-        $values .= ')';
-
-        $query .= $keys . ' VALUES ' . $values;
+        $query = "INSERT INTO `$table` " . $keys . ' VALUES ' . $values;
 
         return $this->fire($query);
     }
 
-    public function select($table, $fields = '') {
+    public function select($table, $fields = []) {
         if($fields) {
-            $list = '';
-            foreach ($fields as $key => $value) {
-                if($list) $list .= ' AND ';
-                $list .= $key . '=' . "'" . $value . "'";
-            }
+            $list = $this->setSQLString($fields);
             return $this->fire("SELECT * FROM $table WHERE " . $list);
         } else {
             return $this->fire("SELECT * FROM $table");
         }
     }
 
-    public function fetch($table, $fields = '') { return $this->select($table, $fields); }
+    public function fetch($table, $fields = []) { return $this->select($table, $fields); }
 
     public function update($table, $match, $fields) {
-        $list = '';
-        $list2 = '';
-        foreach ($fields as $key => $value) {
-            if($list) $list .= ', ';
-            $list .= $key . '=' . "'" . mysqli_real_escape_string($this->con,$value) . "'";
-        }
+        $match = $this->setSQLString($match);
+        $fields = $this->setSQLString($fields, ",");
 
-        foreach ($match as $key => $value) {
-            if($list2) $list2 .= ' AND ';
-            $list2 .= $key . '=' . "'" . $value . "'";
-        }
-
-        return $this->fire("UPDATE $table SET " . $list . " WHERE " . $list2);    
+        return $this->fire("UPDATE $table SET " . $fields . " WHERE " . $match);
     }
 
     public function delete($table, $fields) {
-        $list = '';
-        foreach ($fields as $key => $value) {
-            if($list) $list .= ' AND ';
-            $list .= $key . '=' . "'" . $value . "'";
-        }
+        $list = $this->setSQLString($fields);
         return $this->fire("DELETE FROM $table WHERE " . $list);
     }
 
     public function getNumRows() { return count($this->result); }
 
-    public function getSingleRow() { foreach($this->result as $row) return $row; }
+    public function getSingleRow() { return $this->result[0]; }
 
     public function getAllRows() { return $this->result; }
 
     public function getError() { return mysqli_error($this->con); }
 
     public function getQuery() { return $this->query; }
+
+    public function affectedRows() { return $this->con->affected_rows; }
 
     private function fetchAllRows() {
         $rows = [];
@@ -104,15 +81,11 @@ class DB {
         }
         return $rows;
     }
-    
-    private function removeLastChar($string) { return substr($string,0,-1); }
 
     private function printError() {
         if(ini_get('display_errors'))
-            echo "query => $this->query<br> error => " . $this->getError();
+            echo "query => $this->query<br>\nerror => " . $this->getError();
     }
-
-    private function isLocalhost() { return $_SERVER['SERVER_NAME'] == 'localhost'; }
 
     private function getQueryType() { return strtoupper(explode(' ', $this->query)[0]); }
 
@@ -121,4 +94,26 @@ class DB {
         $this->limit = 0;
     }
 
+    private function setSQLString(array $array, string $separator = 'AND') {
+        return implode(" $separator ", array_map(function ($key, $value) {
+            if(is_array($value)) {
+                return '(' . implode(' OR ' , array_map(function ($value) use ($key) {
+                        if(is_array($value)) {
+                            return "(`$key` >= '$value[0]' AND '$value[1]' >= `$key`)";
+                        } else {
+                            return "`$key` = '$value'";
+                        }
+                    }, $this->escapeArray($value))) . ')';
+            } else {
+                return "`$key` = '$value'";
+            }
+        }, array_keys($array), $this->escapeArray(array_values($array))));
+    }
+
+    private function escapeArray(array $array) {
+        return array_map(function ($item) {
+            if(is_array($item)) return $item;
+            return mysqli_real_escape_string($this->con, $item);
+        }, $array);
+    }
 }
